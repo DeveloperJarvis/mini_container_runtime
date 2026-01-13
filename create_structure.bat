@@ -6,33 +6,37 @@ set ROOT=.
 
 REM Create directories if they do not exist
 call :create_folder "%ROOT%"
-call :create_folder "%ROOT%\bin"
 call :create_folder "%ROOT%\config"
 call :create_folder "%ROOT%\docs"
+call :create_folder "%ROOT%\examples"
 call :create_folder "%ROOT%\logs"
-call :create_folder "%ROOT%\src"
+call :create_folder "%ROOT%\mini_container_runtime"
 call :create_folder "%ROOT%\tests"
 
 REM Create files only if they do not exist
 REM Python source files (with header)
 call :create_py_file "%ROOT%\setup.py"
 
-call :create_py_file "%ROOT%\bin\run_detection.py"
-
+call :create_py_file "%ROOT%\config\__init__.py"
 call :create_py_file "%ROOT%\config\config.py"
 
-call :create_py_file "%ROOT%\src\__init__.py"
-call :create_py_file "%ROOT%\src\log_reader.py"
-call :create_py_file "%ROOT%\src\pattern_detector.py"
-call :create_py_file "%ROOT%\src\anomaly_detector.py"
-call :create_py_file "%ROOT%\src\storage.py"
-call :create_py_file "%ROOT%\src\report.py"
+call :create_py_file "%ROOT%\examples\run_simple_container.py"
+call :create_py_file "%ROOT%\examples\resource_limits.py"
+
+call :create_py_file "%ROOT%\mini_container_runtime\__init__.py"
+call :create_py_file "%ROOT%\mini_container_runtime\runtime.py"
+call :create_py_file "%ROOT%\mini_container_runtime\container.py"
+call :create_py_file "%ROOT%\mini_container_runtime\namespaces.py"
+call :create_py_file "%ROOT%\mini_container_runtime\cgroups.py"
+call :create_py_file "%ROOT%\mini_container_runtime\filesystem.py"
+call :create_py_file "%ROOT%\mini_container_runtime\logger.py"
+call :create_py_file "%ROOT%\mini_container_runtime\utils.py"
 
 call :create_py_file "%ROOT%\tests\__init__.py"
-call :create_py_file "%ROOT%\tests\test_log_reader.py"
-call :create_py_file "%ROOT%\tests\test_pattern_detector.py"
-call :create_py_file "%ROOT%\tests\test_anomaly_detector.py"
-call :create_py_file "%ROOT%\tests\test_storage.py"
+call :create_py_file "%ROOT%\tests\test_runtime.py"
+call :create_py_file "%ROOT%\tests\test_namespaces.py"
+call :create_py_file "%ROOT%\tests\test_cgroups.py"
+call :create_py_file "%ROOT%\tests\test_filesystem.py"
 
 REM Non-Python files (empty)
 call :create_file "%ROOT%\logs\tool_execution.log"
@@ -79,7 +83,7 @@ echo # -*- Python -*- Compatibility Header
 echo #
 echo # Copyright ^(C^) 2023 Developer Jarvis ^(Pen Name^)
 echo #
-echo # This file is part of the Log Pattern Detection Tool Library. This library is free
+echo # This file is part of the Mini Container Runtime Library. This library is free
 echo # software; you can redistribute it and/or modify it under the
 echo # terms of the GNU General Public License as published by the
 echo # Free Software Foundation; either version 3, or ^(at your option^)
@@ -95,8 +99,8 @@ echo # along with this program. If not, see ^<https://www.gnu.org/licenses/^>.
 echo #
 echo # SPDX-License-Identifier: GPL-3.0-or-later
 echo #
-echo # Log Pattern Detection Tool - Find patterns and anomalies in large log files
-echo #                       Skills: streaming I/O, algorithms, regex
+echo # Mini Container Runtime - Start isolated "containers" using namespaces ^(Linux^)
+echo #               Skills: OS internals, syscalls, process management
 echo #
 echo # Author: Developer Jarvis ^(Pen Name^)
 echo # Contact: https://github.com/DeveloperJarvis

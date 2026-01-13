@@ -17,6 +17,7 @@ EXCLUDE_DIRS = {
     ".env",
     "venv",
     "env",
+    ".envlin",
     "node_modules",
     ".idea",
     ".vscode",

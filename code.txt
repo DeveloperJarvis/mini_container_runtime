@@ -1,0 +1,352 @@
+# setup.py:
+from setuptools import setup, find_packages
+setup(
+    name="mini_container_runtime",
+    version="0.1.0",
+    description="A minimal container runtime using Linux namespaces and cgroups",
+    author="Developer Jarvis",
+    author_email="developerjarvis@github.com",
+    url="https://github.com/DeveloperJarvis/mini_container_runtime",
+    packages=find_packages(),
+    python_requires=">=3.9",
+    install_requires=[
+    ],
+    extras_require={
+        "dev": [
+            "pytest",
+            "black",
+            "flake8",
+        ],
+    },
+    entry_points={
+        "console_scripts": [
+            "mcr_run=mini_container_runtime.runtime:main",
+        ]
+    },
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "License :: OSI Approved :: GNU General Public License v3 or later (GPLv3+)",
+        "Operating System :: POSIX :: Linux",
+    ],
+)
+
+
+# config\__init__.py:
+"""
+Configuration package for Mini Container Runtime.
+Provides access to default runtime settings and environment overrides.
+"""
+from .config import Config
+
+
+# config\config.py:
+import os
+class Config:
+    """
+    Central configuration for Mini Container Runtime
+    """
+    DEFAULT_CGROUP_CPU_LIMIT = os.getenv("MCR_CPU_LIST", "100%")
+    DEFAULT_CGROUP_MEMORY_LIST = os.getenv("MCR_MEMORY_LIMIT", "512M")
+    DEFAULT_CONTAINER_ROOT = os.getenv("MCR_ROOT_FS", "/var/lib/mcr")
+    DEFAULT_NETWORK_NAMESPACE = os.getenv("MCR_NET_NS", "host")
+    LOG_LEVEL = os.getenv("MCR_LOG_LEVEL", "INFO")
+    PROJECT_DIR = os.path.abspath(os.path.join(
+            os.path.dirname(__file__), "..",
+        ))
+    LOG_FILE = os.path.join(PROJECT_DIR, "logs",
+                            "mini_container.log")
+    HEARTBEAT_INTERVAL = int(os.getenv(
+        "MCR_HEARTBEAT_INTERVAL", "5"
+    ))
+    DEFAULT_TIMEOUT_SECONDS = int(os.getenv(
+        "MCR_DEFAULT_TIMEOUT", "60"
+    ))
+
+
+# examples\resource_limits.py:
+
+
+
+# examples\run_simple_container.py:
+from mini_container_runtime.runtime import MiniRuntime
+runtime = MiniRuntime()
+runtime.run_container(
+    command=["/bin/sh"],
+    rootfs="/tmp/rootfs",
+    hostname="demo-container"
+)
+
+
+# mini_container_runtime\__init__.py:
+"""
+Mini Container Runtime
+A minimal educational container runtime using Linux namespaces and cgroups.
+"""
+from .runtime import MiniRuntime
+from .container import Container
+
+
+# mini_container_runtime\cgroups.py:
+import os
+from mini_container_runtime.logger import setup_logger
+from mini_container_runtime.utils import ensure_dir
+log = setup_logger("Cgroups")
+CGROUP_ROOT = "/sys/fs/cgroup"
+class Cgroup:
+    def __init__(self, name: str):
+        self.path = os.path.join(CGROUP_ROOT, name)
+        ensure_dir(self.path)
+    def set_memory_limit(self, limit_bytes: int):
+        log.info(f"Setting memory limit: {limit_bytes}")
+        with open(os.path.join(self.path, "memory.max"), "w") as f:
+            f.write(str(limit_bytes))
+    def set_cpu_limit(self, quota: int, period: int = 100000):
+        log.info(f"Setting CPU limit: quota={quota}")
+        with open(os.path.join(self.path, "cpu.max"), "w") as f:
+            f.write(f"{quota} {period}")
+    def add_process(self, pid: int):
+        with open(os.path.join(self.path, "cgroup.procs"), "w") as f:
+            f.write(str(pid))
+
+
+# mini_container_runtime\container.py:
+import os
+import subprocess
+from mini_container_runtime.logger import setup_logger
+from mini_container_runtime import namespaces
+from mini_container_runtime.filesystem import setup_rootfs
+from mini_container_runtime.cgroups import Cgroup
+log = setup_logger("Container")
+class Container:
+    def __init__(
+        self,
+        command,
+        rootfs="/tmp/mini_rootfs",
+        hostname="mini_container",
+        memory_limit=None,
+        cpu_quota=None,
+    ):
+        self.command = command
+        self.rootfs = rootfs
+        self.hostname = hostname
+        self.memory_limit = memory_limit
+        self.cpu_quota = cpu_quota
+    def run(self):
+        log.info("Starting container")
+        namespaces.unshare([
+            namespaces.CLONE_NEWNS,
+            namespaces.CLONE_NEWPID,
+            namespaces.CLONE_NEWUTS,
+        ])
+        pid = os.fork()
+        if pid == 0:
+            namespaces.set_hostname(self.hostname)
+            setup_rootfs(self.rootfs)
+            log.info(f"Executing command: {self.command}")
+            os.execvp(self.command[0], self.command)
+        else:
+            if self.memory_limit or self.cpu_quota:
+                cg = Cgroup(f"mini_{pid}")
+                if self.memory_limit:
+                    cg.set_memory_limit(self.memory_limit)
+                if self.cpu_quota:
+                    cg.set_cpu_limit(self.cpu_quota)
+                cg.add_process(pid)
+            os.waitpid(pid, 0)
+            log.info("Container exited")
+
+
+# mini_container_runtime\filesystem.py:
+import os
+import subprocess
+from mini_container_runtime.logger import setup_logger
+from mini_container_runtime.utils import ensure_dir
+log = setup_logger("Filesystem")
+def setup_rootfs(rootfs: str):
+    """
+    Prepare minimal filesystem isolation using chroot + mount namespace.
+    """
+    ensure_dir(rootfs)
+    log.info(f"Mounting rootfs: {rootfs}")
+    subprocess.run(["mount", "--bind", rootfs, rootfs], check=True)
+    os.chdir(rootfs)
+    os.chroot(".")
+    os.chdir("/")
+    log.info("Root filesystem isolated")
+
+
+# mini_container_runtime\logger.py:
+import logging
+from config import Config
+def setup_logger(name: str):
+    logger = logging.getLogger(name)
+    if not logger.handlers:
+        logging.basicConfig(
+            level=logging.INFO,
+            filename=Config.LOG_FILE,
+            format="[%(asctime)s] [%(levelname)s] %(name)s: %(message)s",
+        )
+    return logger
+
+
+# mini_container_runtime\namespaces.py:
+import os
+import subprocess
+from mini_container_runtime.logger import setup_logger
+log = setup_logger("Namespaces")
+CLONE_NEWNS     = 0x00020000
+CLONE_NEWPID    = 0x20000000
+CLONE_NEWUTS    = 0x04000000
+CLONE_NEWNET    = 0x40000000
+CLONE_NEWPIC    = 0x08000000
+def unshare(namespaces):
+    """
+    Unshare namespaces using the `unshare` syscall wrapper.
+    """
+    flags = 0
+    for ns in namespaces:
+        flags |= ns
+    log.info(f"Unsharing namespaces: {namespaces}")
+    os.unshare(flags)
+def set_hostname(hostname: str):
+    log.info(f"Setting hostname: {hostname}")
+    subprocess.run(["hostname", hostname], check=True)
+
+
+# mini_container_runtime\runtime.py:
+from mini_container_runtime.container import Container
+from mini_container_runtime.utils import require_root
+from mini_container_runtime.logger import setup_logger
+log = setup_logger("Runtime")
+class MiniRuntime:
+    """
+    Entry point for running containers.
+    """
+    def __init__(self):
+        require_root()
+    def run_container(
+            self,
+            command,
+            rootfs,
+            hostname="mini",
+            memory_limit=None,
+            cpu_quota=None,
+    ):
+        container = Container(
+            command=command,
+            rootfs=rootfs,
+            hostname=hostname,
+            memory_limit=memory_limit,
+            cpu_quota=cpu_quota,
+        )
+        container.run()
+
+
+# mini_container_runtime\utils.py:
+import os
+def ensure_dir(path: str):
+    if not os.path.exists(path):
+        os.makedirs(path, exist_ok=True)
+def require_root():
+    if os.geteuid() != 0:
+        raise PermissionError(
+            "Mini Container Runtime must be run as root"
+        )
+
+
+# tests\__init__.py:
+
+
+
+# tests\test_cgroups.py:
+import os
+from mini_container_runtime.cgroups import Cgroup
+def test_cgroup_path_created(tmp_path, monkeypatch):
+    fake_root = tmp_path / "cgroup"
+    monkeypatch.setattr(
+        "mini_container_runtime.cgroups.CGROUP_ROOT",
+        str(fake_root)
+    )
+    cg = Cgroup("testgroup")
+    assert os.path.isdir(cg.path)
+def test_cgroup_add_process(tmp_path, monkeypatch):
+    fake_root = tmp_path / "cgroup"
+    monkeypatch.setattr(
+        "mini_container_runtime.cgroups.CGROUP_ROOT",
+        str(fake_root)
+    )
+    cg = Cgroup("testgroup")
+    procs = os.path.join(cg.path, "cgroup.procs")
+    cg.add_process(1234)
+    with open(procs) as f:
+        assert f.read().strip() == "1234"
+
+
+# tests\test_filesystem.py:
+import pytest
+from mini_container_runtime.filesystem import setup_rootfs
+def test_setup_rootfs_creates_directory(tmp_path, monkeypatch):
+    rootfs = tmp_path / "rootfs"
+    monkeypatch.setattr("subprocess.run", lambda *a, **k: None)
+    monkeypatch.setattr("os.chroot", lambda _: None)
+    monkeypatch.setattr("os.chdir", lambda _: None)
+    setup_rootfs(str(rootfs))
+    assert rootfs.exists()
+
+
+# tests\test_namespaces.py:
+import pytest
+from mini_container_runtime import namespaces
+from unittest.mock import patch
+def test_namespace_flags_are_ints():
+    assert isinstance(namespaces.CLONE_NEWNS, int)
+    assert isinstance(namespaces.CLONE_NEWPID, int)
+    assert isinstance(namespaces.CLONE_NEWUTS, int)
+def test_invalid_hostname_rejected():
+    with patch("subprocess.run") as mock_run:
+        mock_run.side_effect = subprocess.CalledProcessError(
+            1, ["hostname", "bad_hostname"]
+        )
+        with pytest.raises(subprocess.CalledProcessError):
+            namespaces.set_hostname("bad_hostname")
+def test_valid_hostname_passes(monkeypatch):
+    called = {}
+    def fake_run(cmd, check):
+        called["hostname"] = cmd[1]
+        return
+    monkeypatch.setattr(
+        "os.sethostname",
+        lambda name: called.setdefault("hostname", name)
+    )
+    namespaces.set_hostname("valid-host")
+    with patch("subprocess.run", fake_run):
+        namespaces.set_hostname("valid-host")
+    assert called["hostname"] == "valid-host"
+
+
+# tests\test_runtime.py:
+import pytest
+from mini_container_runtime.runtime import MiniRuntime
+from mini_container_runtime.container import Container
+def test_runtime_requires_root(monkeypatch):
+    monkeypatch.setattr("os.geteuid", lambda: 1000)
+    with pytest.raises(PermissionError):
+        MiniRuntime()
+def test_run_container_creates_container(monkeypatch):
+    monkeypatch.setattr("os.geteuid", lambda: 0)
+    created = {}
+    def fake_run(self):
+        created["container"] = self
+    monkeypatch.setattr(Container, "run", fake_run)
+    runtime = MiniRuntime()
+    runtime.run_container(
+        command=["/bin/echo", "hello"],
+        rootfs="/tmp/rootfs",
+        hostname='test-container',
+    )
+    c = created["container"]
+    assert c.command == ["/bin/echo", "hello"]
+    assert c.rootfs == "/tmp/rootfs"
+    assert c.hostname == "test-container"
+
+
